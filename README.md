@@ -37,3 +37,17 @@
 
 Now you're all set to further development! 🚀
 
+### How to Run with Docker
+Advantage of running with docker is that you can forget about systems dependencies, with docker it doesn't matter which OS you are using. Therefore if code doesn't run for you because of mysterious errors, you can try to run this code with Docker.
+
+1. Make sure you did steps in [data preparation](#prepare-to-data-download) and did clone this repo.
+2. Make sure Docker is installed on your system. You can download it from [Docker’s official website](https://docs.docker.com/desktop/)
+3. Build the docker image: 
+    ```bash 
+    docker build -t fairness-first .
+    ```
+4. Run the container:
+    ```bash 
+    docker run -it my-container /bin/bash
+    ```
+    When you started to run the container, you can stop the session by typing ```exit``` in the terminal or press `Ctrl + D`.
