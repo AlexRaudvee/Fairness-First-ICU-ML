@@ -29,14 +29,9 @@ X_final = pd.concat([X_encoded, X[numerical_columns].reset_index(drop=True)], ax
 # Split into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(X_final, y, test_size=0.2, random_state=42)
 
-# Standardize numerical features
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
-
 # Train Logistic Regression
 log_reg = LogisticRegression(max_iter=1000)
-log_reg.fit(X_train_scaled, y_train)
+log_reg.fit(X_train, y_train)
 
 # Get feature importance from logistic regression coefficients
 feature_importance = pd.DataFrame({
