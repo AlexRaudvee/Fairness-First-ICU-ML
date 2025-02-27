@@ -1,21 +1,10 @@
-import time, matplotlib, sklearn
-# visualizatoin 
-import matplotlib.pyplot as plt 
-import seaborn as sns
 # data wrangling
 import pandas as pd
-import numpy as np 
+
 # data preprocessing
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer, make_column_selector
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.feature_selection import VarianceThreshold
-from sklearn.impute import SimpleImputer
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.preprocessing import RobustScaler
 
-from sklearn.linear_model import LogisticRegression
+# custom imports
 from utils import *
 
 # PREPROCESSING PIPELINE
@@ -42,6 +31,9 @@ print(f"Feature Number Before: {len(df.columns)}")
 df = drop_highly_correlated_features(df)
 print(f"Feature Number After: {len(df.columns)}")
 
-print("\nSave DF: ")
-df.to_csv("physionet.org/files/widsdatathon2020/1.0.0/data/cleaned_imputed_training.csv")
-print(f"Saved at: {'physionet.org/files/widsdatathon2020/1.0.0/data/cleaned_imputed_training.csv'}")
+# drop the columns that are cause bias
+df = df.drop(columns=["encounter_id", "patient_id", "hospital_id"])
+
+print("\n Save the DF: ")
+df.to_csv("physionet.org/files/widsdatathon2020/1.0.0/data/cleaned_imputed.csv")
+print(f"Saved at: {'physionet.org/files/widsdatathon2020/1.0.0/data/'}")
