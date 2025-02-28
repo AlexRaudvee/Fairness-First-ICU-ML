@@ -32,7 +32,7 @@ X_train, X_test, y_train, y_test = train_test_split(X_final, y, test_size=0.2, r
 
 # Initialize Logistic Regression Model
 # Increase max_iter if the solver needs more iterations to converge
-model = LogisticRegression(random_state=42, max_iter=1000)
+model = LogisticRegression(random_state=42, class_weight="balanced", max_iter=1000)
 model.fit(X_train, y_train)
 
 # Predict on test set
