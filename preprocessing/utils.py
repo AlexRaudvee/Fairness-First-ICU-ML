@@ -3,8 +3,8 @@ import pandas as pd
 
 # data preprocessing
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import RobustScaler
-
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
 
 
 def drop_high_NaN_features(df: pd.DataFrame):
@@ -13,7 +13,7 @@ def drop_high_NaN_features(df: pd.DataFrame):
     columns_to_drop = missing_percent[missing_percent > 50].index
     cleaned_df = df.drop(columns=columns_to_drop)
     
-    return cleaned_df
+    return cleaned_df, columns_to_drop
 
 
 def impute_values_for_features(df: pd.DataFrame):
@@ -33,11 +33,19 @@ def impute_values_for_features(df: pd.DataFrame):
     return imputed_df
 
 
-def robust_scaling_of_features(df: pd.DataFrame):
-    numerical_columns = df.select_dtypes(include=['int64', 'float64']).columns.drop(["encounter_id", "patient_id", "hospital_id"])
+def standard_scaling_of_features(df: pd.DataFrame, int_cols: list, float_cols: list) -> pd.DataFrame:
+    # Initialize the scaler
+    scaler = StandardScaler()
 
-    df[numerical_columns] = RobustScaler().fit_transform(df[numerical_columns])
-
+    # Combine the lists but only use those features that are in the DataFrame
+    features = [att for att in (int_cols + float_cols) if att in df.columns]
+    missing_features = set(int_cols + float_cols) - set(features)
+    if missing_features:
+        print("These features are missing from the DataFrame:", missing_features)
+        
+    
+    # Fit the scaler to the numeric features and transform them
+    df[features] = scaler.fit_transform(df[features])
     return df
 
 
@@ -73,3 +81,24 @@ def print_nan_info(df):
         print(nan_df)
 
     
+def drop_outliers(df: pd.DataFrame, int_cols: list, float_cols: list) -> pd.DataFrame:
+    iso_forest = IsolationForest(contamination=0.05, random_state=69)
+
+    # Combine the lists but only use those features that are in the DataFrame
+    features = [att for att in (int_cols + float_cols) if att in df.columns]
+    missing_features = set(int_cols + float_cols) - set(features)
+    if missing_features:
+        print("These features are missing from the DataFrame:", missing_features)
+        
+    # Initialize and fit the IsolationForest
+    # 'contamination' parameter sets the proportion of expected outliers
+    iso_forest = IsolationForest(contamination=0.05, random_state=42)
+    iso_forest.fit(df[features])
+
+    # Predict: 1 for inliers, -1 for outliers
+    df['anomaly'] = iso_forest.predict(df[features])
+
+    # Keep only the inliers
+    df_clean = df[df['anomaly'] == 1].drop('anomaly', axis=1)
+
+    return df_clean
