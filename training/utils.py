@@ -35,27 +35,13 @@ def impute_values_for_features(df: pd.DataFrame):
 
 def robust_scaling_of_features(df: pd.DataFrame, int_cols: list, float_cols: list) -> pd.DataFrame:
     features = [att for att in (int_cols + float_cols) if att in df.columns]
-    missing_features = set(int_cols + float_cols) - set(features)
-    if missing_features:
-        print("These features are missing from the DataFrame:", missing_features)
-        
     df[features] = RobustScaler().fit_transform(df[features])
     return df
 
 
 def standard_scaling_of_features(df: pd.DataFrame, int_cols: list, float_cols: list) -> pd.DataFrame:
-    # Initialize the scaler
-    scaler = StandardScaler()
-
-    # Combine the lists but only use those features that are in the DataFrame
     features = [att for att in (int_cols + float_cols) if att in df.columns]
-    missing_features = set(int_cols + float_cols) - set(features)
-    if missing_features:
-        print("These features are missing from the DataFrame:", missing_features)
-        
-    
-    # Fit the scaler to the numeric features and transform them
-    df[features] = scaler.fit_transform(df[features])
+    df[features] = StandardScaler().fit_transform(df[features])
     return df
 
 
@@ -73,7 +59,7 @@ def drop_highly_correlated_features(df: pd.DataFrame, threshold: float = 0.5):
                 
     to_drop.add("readmission_status") # remove the full zeros feature
     
-    return df.drop(columns=to_drop, errors='ignore')
+    return df.drop(columns=to_drop, errors='ignore'), to_drop
 
 
 def print_nan_info(df):
@@ -112,3 +98,13 @@ def drop_outliers(df: pd.DataFrame, int_cols: list, float_cols: list) -> pd.Data
     df_clean = df[df['anomaly'] == 1].drop('anomaly', axis=1)
 
     return df_clean
+
+def get_path_until_data(s):
+    marker = "/data/"
+    idx = s.find(marker)
+    if idx != -1:
+        # Return the substring up to and including "/data/"
+        return s[:idx + len(marker)]
+    else:
+        return None  # or handle the case when marker is not found
+

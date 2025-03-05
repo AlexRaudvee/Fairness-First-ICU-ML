@@ -11,6 +11,9 @@ from sklearn.metrics import (accuracy_score, confusion_matrix, classification_re
                              roc_curve, auc, precision_recall_curve, f1_score,
                              average_precision_score, brier_score_loss)
 from sklearn.calibration import calibration_curve
+from utils import *
+
+
 
 class CustomPipeline:
     def __init__(self, model_type: str = "logreg"):
@@ -30,22 +33,80 @@ class CustomPipeline:
         else:
             raise TypeError(f"{self.model_type} is not yet supported, check the docs")
     
-    def preprocessing(self, df: pd.DataFrame, target: str):
-        self.df = df
+    def preprocessing(self, data_path: str, desc_path: str, target: str):
+        
+        # PREPROCESSING PIPELINE
+
+        self.df: pd.DataFrame = pd.read_csv(data_path)
+        df_: pd.DataFrame = pd.read_csv(desc_path)
+
+        BINARY_ATTS = df_[df_['Data Type'].str.lower() == 'binary']['Variable Name'].tolist()
+        print(f"Binary atts : {BINARY_ATTS}")
+        STRING_ATTS = df_[df_['Data Type'].str.lower() == 'string']['Variable Name'].tolist()
+        print(f"String atts : {STRING_ATTS}")
+        INT_ATTS = df_[df_['Data Type'].str.lower() == 'integer']['Variable Name'].tolist()
+        print(f"Integer atts : {INT_ATTS}")
+        FLOAT_ATTS = df_[df_['Data Type'].str.lower() == 'numeric']['Variable Name'].tolist()
+        FLOAT_ATTS.remove('pred')
+        print(f"Float atts : {FLOAT_ATTS}")
+
+        # drop the id columns and those that are non relevant for the predictions (noise or baseline predictions)
+        self.df = self.df.drop(columns=["encounter_id", "patient_id", "hospital_id", "icu_id", "icu_stay_type", "apache_4a_hospital_death_prob", "apache_4a_icu_death_prob"])
+
+        print("\nDrop features with high NANs: ")
+        print(f"Feature Number Before: {len(self.df.columns)}")
+        self.df, columns_to_drop = drop_high_NaN_features(self.df)
+        print(f"Feature Number After: {len(self.df.columns)}")
+
+        print("\nImpute Remaining Missing Values: ")
+        print(f"Total NANs Before: \n{self.df.isnull().sum().sort_values(ascending=False)}")
+        self.df = impute_values_for_features(self.df)
+        print(f"Total NANs After: \n{self.df.isnull().sum().sort_values(ascending=False)}")
+
+        # print("\nFilter out outliers: \n")
+        # print(f"Shape of the Dataframe before: {self.df.shape}")
+        # self.df = drop_outliers(self.df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
+        # print(f"Shape of the Dataframe after: {self.df.shape}")
+
+        print("\nScale The Data For Better Visualization: ")
+        print(f"Description Before: \n{self.df.select_dtypes(include=['int64', 'float64']).describe(include='all')}")
+        self.df = standard_scaling_of_features(self.df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
+        print(f"Description After: \n{self.df.select_dtypes(include=['int64', 'float64']).describe(include='all')}")
+
+        print("\nDrop Highly Correlated Features: ")
+        print(f"Feature Number Before: {len(self.df.columns)}")
+        self.df, to_drop = drop_highly_correlated_features(self.df)
+        print(f"Feature Number After: {len(self.df.columns)}")
+        print(to_drop)
+        
+        print("\n Save the DF: ")
+        save_path = get_path_until_data(data_path) + "cleaned_imputed.csv"
+        self.df.to_csv(save_path)
+        print(f"Saved at: {save_path}")
+        
+        # Filter out only those columns that exist in the DataFrame
+        int_cols = [col for col in BINARY_ATTS+INT_ATTS if col in self.df.columns]
+        str_cols = [col for col in STRING_ATTS if col in self.df.columns]
+        float_cols = [col for col in FLOAT_ATTS if col in self.df.columns]
+
+        # Convert the existing columns to numeric and float for memory optimization, coercing errors to NaN 
+        self.df[int_cols] = self.df[int_cols].apply(lambda col: pd.to_numeric(col, errors='raise', downcast="integer"))
+        self.df[float_cols] = self.df[float_cols].apply(lambda col: pd.to_numeric(col, errors='raise', downcast="float"))
+        
+        print(self.df.columns)
         
         # Separate features and target
-        X = df.drop(columns=[target])
-        y = df[target]
+        X = self.df.drop(columns=[target])
+        y = self.df[target]
         
         # Identify categorical and numerical columns
         cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
         num_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-
         
         # One-Hot Encode categorical variables
         ohe = OneHotEncoder(drop='first', sparse=False)  # drop='first' avoids dummy variable trap
         X_encoded = pd.DataFrame(ohe.fit_transform(X[cat_cols]))
-            
+        
         # Restore column names after encoding
         X_encoded.columns = ohe.get_feature_names_out(cat_cols)
 
@@ -61,7 +122,7 @@ class CustomPipeline:
               y train: {self.y_train.shape}\n
               y test: {self.y_test.shape}\n
               """)
-        
+
     def train(self):
         self.model.fit(self.X_train, self.y_train)
         print("Training is Done")
