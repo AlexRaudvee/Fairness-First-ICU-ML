@@ -37,17 +37,17 @@ print(f"Total NANs After: \n{df.isnull().sum().sort_values(ascending=False)}")
 
 print("\nFilter out outliers: \n")
 print(f"Shape of the Dataframe before: {df.shape}")
-# df = drop_outliers(df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
+df = drop_outliers(df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
 print(f"Shape of the Dataframe after: {df.shape}")
 
 print("\nScale The Data For Better Visualization: ")
 print(f"Description Before: \n{df.select_dtypes(include=['int64', 'float64']).describe(include='all')}")
-# df = standard_scaling_of_features(df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
+df = standard_scaling_of_features(df, int_cols=INT_ATTS, float_cols=FLOAT_ATTS)
 print(f"Description After: \n{df.select_dtypes(include=['int64', 'float64']).describe(include='all')}")
 
 print("\nDrop Highly Correlated Features: ")
 print(f"Feature Number Before: {len(df.columns)}")
-# df = drop_highly_correlated_features(df)
+df = drop_highly_correlated_features(df)
 print(f"Feature Number After: {len(df.columns)}")
 
 print("\n Save the DF: ")
