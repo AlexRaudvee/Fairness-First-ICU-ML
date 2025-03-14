@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -6,10 +8,10 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, StratifiedShuffleSplit
 from sklearn.metrics import (accuracy_score, confusion_matrix, classification_report,
                              roc_curve, auc, precision_recall_curve, f1_score,
-                             average_precision_score, brier_score_loss)
+                             average_precision_score, brier_score_loss, roc_auc_score)
 from sklearn.calibration import calibration_curve
 from utils import *
 
@@ -25,14 +27,20 @@ class CustomPipeline:
         self.y_pred = None
         self.y_prob = None
         self.df = None
+        self.reweighting = False
         
         if self.model_type == "logreg":
-            self.model = LogisticRegression(random_state=69, class_weight="balanced", max_iter=1000)
+            self.model = LogisticRegression(random_state=69, class_weight="balanced", max_iter=10000)
         elif self.model_type == "dectree":
             self.model = DecisionTreeClassifier(criterion='gini', random_state=42)
         else:
             raise TypeError(f"{self.model_type} is not yet supported, check the docs")
-    
+
+        self.sensitive_features = ['age', 'bmi', 'ethnicity', 'gender', 'height',
+                              'apache_2_diagnosis', 'aids', 'cirrhosis',
+                              'diabetes_mellitus', 'immunosuppression', 'leukemia',
+                              'lymphoma', 'solid_tumor_with_metastasis']
+
     def preprocessing(self, data_path: str, desc_path: str, target: str):
         
         # PREPROCESSING PIPELINE
@@ -99,12 +107,17 @@ class CustomPipeline:
         X = self.df.drop(columns=[target])
         y = self.df[target]
         
+
+        # Apply Reweighing
+        self.sample_weights = self.apply_reweighing(X, y)
+
+
         # Identify categorical and numerical columns
         cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
         num_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
         
         # One-Hot Encode categorical variables
-        ohe = OneHotEncoder(drop='first', sparse=False)  # drop='first' avoids dummy variable trap
+        ohe = OneHotEncoder(drop='first', sparse_output=False)  # drop='first' avoids dummy variable trap
         X_encoded = pd.DataFrame(ohe.fit_transform(X[cat_cols]))
         
         # Restore column names after encoding
@@ -123,8 +136,90 @@ class CustomPipeline:
               y test: {self.y_test.shape}\n
               """)
 
+    def apply_reweighing(self, X, y):
+        """
+        Compute reweighting factors based on multiple sensitive attributes,
+        handling both numerical and categorical sensitive features.
+        """
+        weights = np.ones(len(y))
+
+        for feature in self.sensitive_features:
+            if X[feature].dtype in [np.float64, np.int64]:
+                privileged = X[feature].median()
+                p_obs = y[X[feature] >= privileged].mean()
+            else:
+                most_frequent = X[feature].mode()[0]
+                p_obs = y[X[feature] == most_frequent].mean()
+
+            p_exp = y.mean()
+            factor = p_exp / (p_obs + 1e-6)  # Avoid division by zero
+
+            if X[feature].dtype in [np.float64, np.int64]:
+                weights[X[feature] >= privileged] *= factor
+            else:
+                weights[X[feature] == most_frequent] *= factor
+
+        return pd.Series(weights, index=X.index)
+
+
+    def nested_cross_validation(self):
+        """
+        Apply nested cross-validation with reweighing.
+        """
+        outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
+        param_grid = {
+            'penalty': ['l1', 'l2'],
+            'C': [0.01, 0.1, 1, 10],
+            'solver': ['liblinear', 'saga'],
+            'class_weight': [None, 'balanced'],
+        }
+
+        best_models = []
+        best_scores = []
+
+        for train_idx, test_idx in outer_cv.split(self.X_train, self.y_train):
+            X_train, X_test = self.X_train.iloc[train_idx], self.X_train.iloc[test_idx]
+            y_train, y_test = self.y_train.iloc[train_idx], self.y_train.iloc[test_idx]
+
+
+            model = LogisticRegression(random_state=69, max_iter=10000)
+            grid_search = GridSearchCV(model, param_grid, scoring='roc_auc', cv=inner_cv, verbose= 2)
+
+            if grid_search.get_params('class_weight') is None:
+                grid_search.fit(X_train, y_train, sample_weight=self.sample_weights.iloc[train_idx])
+            else:
+                grid_search.fit(X_train, y_train)
+
+            best_model = grid_search.best_estimator_
+            best_models.append(best_model)
+
+            y_pred = best_model.predict_proba(X_test)[:, 1]
+            score = roc_auc_score(y_test, y_pred)
+            best_scores.append(score)
+
+        best_idx = np.argmax(best_scores)
+        self.model = best_models[best_idx]
+        print(f"Best model selected with AU-ROC: {best_scores[best_idx]:.4f}")
+
+        if grid_search.best_params_["class_weight"] == None:
+            self.reweighting = True
+        elif grid_search.best_params_["class_weight"] == "balanced":
+            self.reweighting = False
+
+        with open("nested_cv_best_model.pkl", "wb") as f:
+            pickle.dump(self.model, f)
+        print("Best nested CV model saved as nested_cv_best_model.pkl")
+        with open("nested_cv_hyperparams.txt", "w") as f:
+            f.write(str(grid_search.best_params_))
+        print("Best hyperparameters saved in nested_cv_hyperparams.txt")
+
     def train(self):
-        self.model.fit(self.X_train, self.y_train)
+        if self.reweighting:
+            self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights.loc[self.X_train.index])
+        else:
+            self.model.fit(self.X_train, self.y_train)
         print("Training is Done")
 
     def predict(self):
