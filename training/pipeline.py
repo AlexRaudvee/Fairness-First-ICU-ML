@@ -211,9 +211,8 @@ class CustomPipeline:
             best_model = grid_search.best_estimator_
             best_models.append(best_model)
 
-            y_pred = best_model.predict_proba(X_test)[:, 1]
-            score = roc_auc_score(y_test, y_pred)
             y_pred = best_model.predict(X_test)
+            score = f1_score(y_test, y_pred)
             best_scores.append(score)
 
         best_idx = np.argmax(best_scores)

@@ -1,0 +1,1 @@
+{'class_weight': None, 'l1_ratio': 0.0, 'penalty': 'l1', 'solver': 'liblinear'}
