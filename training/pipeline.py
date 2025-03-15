@@ -106,7 +106,6 @@ class CustomPipeline:
         # Separate features and target
         X = self.df.drop(columns=[target])
         y = self.df[target]
-        
 
         # Apply Reweighing
         self.sample_weights = self.apply_reweighing(X, y)
@@ -117,12 +116,12 @@ class CustomPipeline:
         num_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
         
         # One-Hot Encode categorical variables
-        ohe = OneHotEncoder(drop='first', sparse_output=False)  # drop='first' avoids dummy variable trap
-        X_encoded = pd.DataFrame(ohe.fit_transform(X[cat_cols]))
+        self.ohe = OneHotEncoder(drop='first', sparse_output=False)  # drop='first' avoids dummy variable trap
+        X_encoded = pd.DataFrame(self.ohe.fit_transform(X[cat_cols]))
         
         # Restore column names after encoding
-        X_encoded.columns = ohe.get_feature_names_out(cat_cols)
-
+        X_encoded.columns = self.ohe.get_feature_names_out(cat_cols)
+        print(X_encoded.columns)
         # Combine numerical and encoded categorical features
         self.X_final = pd.concat([X_encoded, X[num_cols].reset_index(drop=True)], axis=1)
 
@@ -167,13 +166,14 @@ class CustomPipeline:
         Apply nested cross-validation with reweighing.
         """
         outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+        inner_cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=42)
 
         param_grid = {
-            'penalty': ['l1', 'l2'],
-            'C': [0.01, 0.1, 1, 10],
-            'solver': ['liblinear', 'saga'],
-            'class_weight': [None, 'balanced'],
+            'penalty': ['none', 'l1', 'l2', 'elasticnet'],
+            'l1_ratio': [0.0, 0.5, 1.0],
+            # 'C': [0.1, 1, 10],
+            'solver': ['liblinear', 'saga', 'newton-cg'],
+            'class_weight': [None, 'balanced', 'reweighting'],
         }
 
         best_models = []
@@ -185,12 +185,14 @@ class CustomPipeline:
 
 
             model = LogisticRegression(random_state=69, max_iter=10000)
-            grid_search = GridSearchCV(model, param_grid, scoring='roc_auc', cv=inner_cv, verbose= 2)
+            grid_search = GridSearchCV(model, param_grid, scoring='accuracy', cv=inner_cv, verbose= 2)
 
-            if grid_search.get_params('class_weight') is None:
-                grid_search.fit(X_train, y_train, sample_weight=self.sample_weights.iloc[train_idx])
+            if grid_search.param_grid["class_weight"] == None:
+                grid_search.fit(X_train, y_train)  # No class weights
+            elif grid_search.param_grid["class_weight"] == "reweighting":
+                grid_search.fit(X_train, y_train, sample_weight=self.sample_weights)  # Reweighting
             else:
-                grid_search.fit(X_train, y_train)
+                grid_search.fit(X_train, y_train)  # Balanced class weights
 
             best_model = grid_search.best_estimator_
             best_models.append(best_model)
@@ -203,9 +205,11 @@ class CustomPipeline:
         self.model = best_models[best_idx]
         print(f"Best model selected with AU-ROC: {best_scores[best_idx]:.4f}")
 
-        if grid_search.best_params_["class_weight"] == None:
+        if grid_search.best_params_["class_weight"] == "reweighting":
             self.reweighting = True
         elif grid_search.best_params_["class_weight"] == "balanced":
+            self.reweighting = False
+        else:
             self.reweighting = False
 
         with open("nested_cv_best_model.pkl", "wb") as f:
@@ -217,7 +221,9 @@ class CustomPipeline:
 
     def train(self):
         if self.reweighting:
-            self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights.loc[self.X_train.index])
+            self.X_train = self.ohe.inverse_transform(self.X_train)
+            self.X_train = self.ohe.inverse_transform(self.y_train)
+            self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights)
         else:
             self.model.fit(self.X_train, self.y_train)
         print("Training is Done")
@@ -228,6 +234,7 @@ class CustomPipeline:
             self.y_prob = self.model.predict_proba(self.X_test)[:, 1]
         
     def eval(self):
+
         # Calculate evaluation metrics
         if self.model_type == "logreg":
             accuracy = accuracy_score(self.y_test, self.y_pred)
@@ -408,3 +415,14 @@ class CustomPipeline:
     
     def __repr__(self):
         return f"Model: {self.model_type}, data: {self.df}"
+
+
+
+
+
+pipe = CustomPipeline("logreg")
+pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+pipe.nested_cross_validation()
+pipe.train()
+pipe.predict()
+pipe.eval()
