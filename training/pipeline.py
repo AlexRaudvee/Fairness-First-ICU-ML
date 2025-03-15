@@ -168,13 +168,25 @@ class CustomPipeline:
         outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         inner_cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=42)
 
-        param_grid = {
-            'penalty': ['none', 'l1', 'l2', 'elasticnet'],
-            'l1_ratio': [0.0, 0.5, 1.0],
-            # 'C': [0.1, 1, 10],
-            'solver': ['liblinear', 'saga', 'newton-cg'],
-            'class_weight': [None, 'balanced', 'reweighting'],
-        }
+        # param_grid = {
+        #     'penalty': ['none', 'l1', 'l2', 'elasticnet'],
+        #     'l1_ratio': [0.0, 0.5, 1.0],
+        #     # 'C': [0.1, 1, 10],
+        #     'solver': ['liblinear', 'saga', 'newton-cg'],
+        #     'class_weight': [None, {0:1, 1:3}, {0:1, 1:5}, 'balanced', 'reweighting'],
+        #     # 'class_weight': [None, 'balanced', 'reweighting'],
+        # }
+
+        param_grid = [
+            {'penalty': ['l1', 'l2'], 'solver': ['liblinear'],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
+            {'penalty': ['l2', 'none'], 'solver': ['newton-cg'],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
+            {'penalty': ['l1', 'l2', 'none'], 'solver': ['saga'],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
+            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']}
+        ]
 
         best_models = []
         best_scores = []
@@ -185,20 +197,23 @@ class CustomPipeline:
 
 
             model = LogisticRegression(random_state=69, max_iter=10000)
-            grid_search = GridSearchCV(model, param_grid, scoring='accuracy', cv=inner_cv, verbose= 2)
-
-            if grid_search.param_grid["class_weight"] == None:
-                grid_search.fit(X_train, y_train)  # No class weights
-            elif grid_search.param_grid["class_weight"] == "reweighting":
-                grid_search.fit(X_train, y_train, sample_weight=self.sample_weights)  # Reweighting
-            else:
-                grid_search.fit(X_train, y_train)  # Balanced class weights
+            grid_search = GridSearchCV(model,param_grid,
+                                       scoring={'recall': 'recall', 'f1': 'f1'}, refit='recall',
+                                       cv=inner_cv, verbose = 2)
+            for param_set in param_grid:
+                if 'class_weight' in param_set and param_set['class_weight'] == None:
+                    grid_search.fit(X_train, y_train)
+                elif 'class_weight' in param_set and param_set['class_weight'] == "reweighting":
+                    grid_search.fit(X_train, y_train, sample_weight=self.sample_weights)
+                else:
+                    grid_search.fit(X_train, y_train)
 
             best_model = grid_search.best_estimator_
             best_models.append(best_model)
 
             y_pred = best_model.predict_proba(X_test)[:, 1]
             score = roc_auc_score(y_test, y_pred)
+            y_pred = best_model.predict(X_test)
             best_scores.append(score)
 
         best_idx = np.argmax(best_scores)
