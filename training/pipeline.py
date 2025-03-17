@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -6,13 +8,14 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, StratifiedShuffleSplit
 from sklearn.metrics import (accuracy_score, confusion_matrix, classification_report,
                              roc_curve, auc, precision_recall_curve, f1_score,
-                             average_precision_score, brier_score_loss)
+                             average_precision_score, brier_score_loss, roc_auc_score)
 from sklearn.calibration import calibration_curve
 from utils import *
-
+import shap
+from lime.lime_tabular import LimeTabularExplainer
 
 
 class CustomPipeline:
@@ -25,14 +28,20 @@ class CustomPipeline:
         self.y_pred = None
         self.y_prob = None
         self.df = None
+        self.reweighting = False
         
         if self.model_type == "logreg":
-            self.model = LogisticRegression(random_state=69, class_weight="balanced", max_iter=1000)
+            self.model = LogisticRegression(random_state=69, class_weight="balanced", max_iter=10000)
         elif self.model_type == "dectree":
             self.model = DecisionTreeClassifier(criterion='gini', random_state=42)
         else:
             raise TypeError(f"{self.model_type} is not yet supported, check the docs")
-    
+
+        self.sensitive_features = ['age', 'bmi', 'ethnicity', 'gender', 'height',
+                              'apache_2_diagnosis', 'aids', 'cirrhosis',
+                              'diabetes_mellitus', 'immunosuppression', 'leukemia',
+                              'lymphoma', 'solid_tumor_with_metastasis']
+
     def preprocessing(self, data_path: str, desc_path: str, target: str):
         
         # PREPROCESSING PIPELINE
@@ -98,18 +107,22 @@ class CustomPipeline:
         # Separate features and target
         X = self.df.drop(columns=[target])
         y = self.df[target]
-        
+
+        # Apply Reweighing
+        self.sample_weights = self.apply_reweighing(X, y)
+
+
         # Identify categorical and numerical columns
         cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
         num_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
         
         # One-Hot Encode categorical variables
-        ohe = OneHotEncoder(drop='first', sparse=False)  # drop='first' avoids dummy variable trap
-        X_encoded = pd.DataFrame(ohe.fit_transform(X[cat_cols]))
+        self.ohe = OneHotEncoder(drop='first', sparse_output=False)  # drop='first' avoids dummy variable trap
+        X_encoded = pd.DataFrame(self.ohe.fit_transform(X[cat_cols]))
         
         # Restore column names after encoding
-        X_encoded.columns = ohe.get_feature_names_out(cat_cols)
-
+        X_encoded.columns = self.ohe.get_feature_names_out(cat_cols)
+        print(X_encoded.columns)
         # Combine numerical and encoded categorical features
         self.X_final = pd.concat([X_encoded, X[num_cols].reset_index(drop=True)], axis=1)
 
@@ -123,8 +136,103 @@ class CustomPipeline:
               y test: {self.y_test.shape}\n
               """)
 
-    def train(self):
-        self.model.fit(self.X_train, self.y_train)
+    def apply_reweighing(self, X, y):
+        """
+        Compute reweighting factors based on multiple sensitive attributes,
+        handling both numerical and categorical sensitive features.
+        """
+        weights = np.ones(len(y))
+
+        for feature in self.sensitive_features:
+            if X[feature].dtype in [np.float64, np.int64]:
+                privileged = X[feature].median()
+                p_obs = y[X[feature] >= privileged].mean()
+            else:
+                most_frequent = X[feature].mode()[0]
+                p_obs = y[X[feature] == most_frequent].mean()
+
+            p_exp = y.mean()
+            factor = p_exp / (p_obs + 1e-6)  # Avoid division by zero
+
+            if X[feature].dtype in [np.float64, np.int64]:
+                weights[X[feature] >= privileged] *= factor
+            else:
+                weights[X[feature] == most_frequent] *= factor
+
+        return pd.Series(weights, index=X.index)
+
+
+    def nested_cross_validation(self):
+        """
+        Apply nested cross-validation with reweighing.
+        """
+        outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        inner_cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=42)
+
+        # param_grid = {
+        #     'penalty': ['none', 'l1', 'l2', 'elasticnet'],
+        #     'l1_ratio': [0.0, 0.5, 1.0],
+        #     # 'C': [0.1, 1, 10],
+        #     'solver': ['liblinear', 'saga', 'newton-cg'],
+        #     'class_weight': [None, {0:1, 1:3}, {0:1, 1:5}, 'balanced', 'reweighting'],
+        #     # 'class_weight': [None, 'balanced', 'reweighting'],
+        # }
+
+        param_grid = [
+            {'penalty': ['l1', 'l2'], 'solver': ['liblinear'],
+             'C' : [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['l2' ], 'solver': ['newton-cg'],
+             'C': [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['l1', 'l2'], 'solver': ['saga'], 'C' : [0.1, 1, 10],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0], 'C' : [0.1, 1, 10],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']}
+        ]
+
+        best_models = []
+        best_scores = []
+
+        for train_idx, test_idx in outer_cv.split(self.X_train, self.y_train):
+            X_train, X_test = self.X_train.iloc[train_idx], self.X_train.iloc[test_idx]
+            y_train, y_test = self.y_train.iloc[train_idx], self.y_train.iloc[test_idx]
+
+            model = LogisticRegression(random_state=69, max_iter=10000)
+            grid_search = GridSearchCV(model,param_grid,
+                                       scoring={'recall': 'recall', 'f1': 'f1'}, refit='f1',
+                                       cv=inner_cv, verbose = 2, error_score='raise', n_jobs=3)
+            grid_search.fit(X_train, y_train)
+            best_model = grid_search.best_estimator_
+            best_models.append(best_model)
+
+            y_pred = best_model.predict(X_test)
+            score = f1_score(y_test, y_pred)
+            best_scores.append(score)
+
+        best_idx = np.argmax(best_scores)
+        self.model = best_models[best_idx]
+        print(f"Best model selected with AU-ROC: {best_scores[best_idx]:.4f}")
+
+        if grid_search.best_params_["class_weight"] == "reweighting":
+            self.reweighting = True
+        elif grid_search.best_params_["class_weight"] == "balanced":
+            self.reweighting = False
+        else:
+            self.reweighting = False
+
+        with open("nested_cv_best_model.pkl", "wb") as f:
+            pickle.dump(self.model, f)
+        print("Best nested CV model saved as nested_cv_best_model.pkl")
+        with open("nested_cv_hyperparams.txt", "w") as f:
+            f.write(str(grid_search.best_params_))
+        print("Best hyperparameters saved in nested_cv_hyperparams.txt")
+
+    def train(self, apply_reweighting=False):
+        if apply_reweighting:
+            self.X_train = self.ohe.inverse_transform(self.X_train)
+            self.y_train = self.ohe.inverse_transform(self.y_train)
+            self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights)
+        else:
+            self.model.fit(self.X_train, self.y_train)
         print("Training is Done")
 
     def predict(self):
@@ -133,6 +241,7 @@ class CustomPipeline:
             self.y_prob = self.model.predict_proba(self.X_test)[:, 1]
         
     def eval(self):
+
         # Calculate evaluation metrics
         if self.model_type == "logreg":
             accuracy = accuracy_score(self.y_test, self.y_pred)
@@ -307,9 +416,60 @@ class CustomPipeline:
         else: 
             raise ValueError("Ooops... Something went wrong, check the model_type during initialization")
         
+    def explain_model(self):
+        try:
+            # SHAP
+            explainer = shap.Explainer(self.model, self.X_train)
+            shap_values = explainer(self.X_test)
+
+            # Plot SHAP 
+            shap.summary_plot(shap_values, self.X_test, plot_type="bar")
+            plt.title('SHAP Summary Plot')
+            plt.savefig('../assets/shap_summary_plot.png')
+            plt.clf()
+
+            # LIME 
+            explainer = LimeTabularExplainer(self.X_train.values,
+                                         mode='classification',
+                                         training_labels=self.y_train,
+                                         feature_names=self.X_train.columns.tolist(),
+                                         class_names=['Negative', 'Positive'],
+                                         random_state=42)
+
+            # Explain a random instance
+            i = np.random.randint(0, self.X_test.shape[0])
+            exp = explainer.explain_instance(self.X_test.iloc[i].values, self.model.predict_proba, num_features=10)
+            exp.as_pyplot_figure()
+            plt.title(f'LIME Explanation {i}')
+            plt.savefig(f'../assets/lime_explanation_instance_{i}.png')
+
+            print(f"LIME explanation for instance {i} saved.")
+            return self
+    
+        except Exception as e:
+            print("Failed to generate or save plot:", e)
+
         
+    
     def __str__(self):
         return f"Model: {self.model_type}, data: {self.df}"
     
     def __repr__(self):
         return f"Model: {self.model_type}, data: {self.df}"
+    
+pipe = CustomPipeline("logreg")
+pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+pipe.nested_cross_validation()
+
+
+print("Model WITHOUT reweighting:")
+pipe.train(apply_reweighting=False)
+pipe.predict()
+pipe.eval()
+
+print("Model WITH reweighting:")
+pipe.train(apply_reweighting=True)
+pipe.predict()
+pipe.eval()
+
+pipe.explain_model()
