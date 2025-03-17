@@ -1,0 +1,1 @@
+{'class_weight': 'balanced', 'penalty': 'l1', 'solver': 'saga'}

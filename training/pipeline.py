@@ -179,13 +179,13 @@ class CustomPipeline:
 
         param_grid = [
             {'penalty': ['l1', 'l2'], 'solver': ['liblinear'],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
-            {'penalty': ['l2', 'none'], 'solver': ['newton-cg'],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
-            {'penalty': ['l1', 'l2', 'none'], 'solver': ['saga'],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']},
-            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced', 'reweighting']}
+             'C' : [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['l2' ], 'solver': ['newton-cg'],
+             'C': [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['l1', 'l2'], 'solver': ['saga'], 'C' : [0.1, 1, 10],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0], 'C' : [0.1, 1, 10],
+             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']}
         ]
 
         best_models = []
@@ -195,19 +195,11 @@ class CustomPipeline:
             X_train, X_test = self.X_train.iloc[train_idx], self.X_train.iloc[test_idx]
             y_train, y_test = self.y_train.iloc[train_idx], self.y_train.iloc[test_idx]
 
-
             model = LogisticRegression(random_state=69, max_iter=10000)
             grid_search = GridSearchCV(model,param_grid,
-                                       scoring={'recall': 'recall', 'f1': 'f1'}, refit='recall',
-                                       cv=inner_cv, verbose = 2)
-            for param_set in param_grid:
-                if 'class_weight' in param_set and param_set['class_weight'] == None:
-                    grid_search.fit(X_train, y_train)
-                elif 'class_weight' in param_set and param_set['class_weight'] == "reweighting":
-                    grid_search.fit(X_train, y_train, sample_weight=self.sample_weights)
-                else:
-                    grid_search.fit(X_train, y_train)
-
+                                       scoring={'recall': 'recall', 'f1': 'f1'}, refit='f1',
+                                       cv=inner_cv, verbose = 2, error_score='raise', n_jobs=3)
+            grid_search.fit(X_train, y_train)
             best_model = grid_search.best_estimator_
             best_models.append(best_model)
 
@@ -233,10 +225,10 @@ class CustomPipeline:
             f.write(str(grid_search.best_params_))
         print("Best hyperparameters saved in nested_cv_hyperparams.txt")
 
-    def train(self):
-        if self.reweighting:
+    def train(self, apply_reweighting=False):
+        if apply_reweighting:
             self.X_train = self.ohe.inverse_transform(self.X_train)
-            self.X_train = self.ohe.inverse_transform(self.y_train)
+            self.y_train = self.ohe.inverse_transform(self.y_train)
             self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights)
         else:
             self.model.fit(self.X_train, self.y_train)
@@ -434,9 +426,18 @@ class CustomPipeline:
 
 
 
-pipe = CustomPipeline("logreg")
-pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
-pipe.nested_cross_validation()
-pipe.train()
-pipe.predict()
-pipe.eval()
+# pipe = CustomPipeline("logreg")
+# pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+# pipe.nested_cross_validation()
+
+
+# print("Model WITHOUT reweighting:")
+# pipe.train(apply_reweighting=False)
+# pipe.predict()
+# pipe.eval()
+#
+# print("Model WITH reweighting:")
+# pipe.train(apply_reweighting=True)
+# pipe.predict()
+# pipe.eval()
+
