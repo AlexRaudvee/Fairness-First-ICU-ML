@@ -6,7 +6,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.ensemble import IsolationForest
 
-
+RANDOM_SEED = 28
+MAX_ITER = 5000
 def drop_high_NaN_features(df: pd.DataFrame):
     
     missing_percent = df.isnull().sum() * 100 / len(df)

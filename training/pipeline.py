@@ -30,9 +30,9 @@ class CustomPipeline:
         self.reweighting = False
         
         if self.model_type == "logreg":
-            self.model = LogisticRegression(random_state=69, class_weight="balanced", max_iter=10000)
+            self.model = LogisticRegression(random_state=RANDOM_SEED, class_weight="balanced", max_iter=MAX_ITER)
         elif self.model_type == "dectree":
-            self.model = DecisionTreeClassifier(criterion='gini', random_state=42)
+            self.model = DecisionTreeClassifier(criterion='gini', random_state=RANDOM_SEED)
         else:
             raise TypeError(f"{self.model_type} is not yet supported, check the docs")
 
@@ -126,7 +126,7 @@ class CustomPipeline:
         self.X_final = pd.concat([X_encoded, X[num_cols].reset_index(drop=True)], axis=1)
 
         # Split into training and testing sets
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_final, y, test_size=0.2, random_state=69)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X_final, y, test_size=0.2, random_state=RANDOM_SEED)
 
         print(f"""
               X train: {self.X_train.shape}\n
@@ -134,6 +134,9 @@ class CustomPipeline:
               y train: {self.y_train.shape}\n
               y test: {self.y_test.shape}\n
               """)
+
+        # sm = SMOTE(random_state=RANDOM_SEED)
+        # self.X_train, self.y_train = sm.fit_resample(self.X_train, self.y_train)
 
     def apply_reweighing(self, X, y):
         """
@@ -165,27 +168,21 @@ class CustomPipeline:
         """
         Apply nested cross-validation with reweighing.
         """
-        outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        inner_cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=42)
-
-        # param_grid = {
-        #     'penalty': ['none', 'l1', 'l2', 'elasticnet'],
-        #     'l1_ratio': [0.0, 0.5, 1.0],
-        #     # 'C': [0.1, 1, 10],
-        #     'solver': ['liblinear', 'saga', 'newton-cg'],
-        #     'class_weight': [None, {0:1, 1:3}, {0:1, 1:5}, 'balanced', 'reweighting'],
-        #     # 'class_weight': [None, 'balanced', 'reweighting'],
-        # }
+        outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
+        inner_cv = StratifiedKFold(n_splits=2, shuffle=True, random_state=RANDOM_SEED)
 
         param_grid = [
             {'penalty': ['l1', 'l2'], 'solver': ['liblinear'],
-             'C' : [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
+             'C' : [0.01, 0.1, 1, 10, 100],'class_weight': [{0: 1, 1: 10}, {0: 1, 1: 7}, {0: 1, 1: 5}, 'balanced']},
+
             {'penalty': ['l2' ], 'solver': ['newton-cg'],
-             'C': [0.1, 1, 10],'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
-            {'penalty': ['l1', 'l2'], 'solver': ['saga'], 'C' : [0.1, 1, 10],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']},
-            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0], 'C' : [0.1, 1, 10],
-             'class_weight': [None, {0: 1, 1: 3}, {0: 1, 1: 5}, 'balanced']}
+             'C': [0.01, 0.1, 1, 10, 100],'class_weight': [{0: 1, 1: 10}, {0: 1, 1: 7}, {0: 1, 1: 5}, 'balanced']},
+
+            {'penalty': ['l1', 'l2'], 'solver': ['saga'],
+             'C' : [0.01, 0.1, 1, 10, 100], 'class_weight': [{0: 1, 1: 10}, {0: 1, 1: 7}, {0: 1, 1: 5}, 'balanced']},
+
+            {'penalty': ['elasticnet'], 'solver': ['saga'], 'l1_ratio': [0.0, 0.5, 1.0],
+             'C' : [0.01, 0.1, 1, 10, 100], 'class_weight': [{0: 1, 1: 10}, {0: 1, 1: 7}, {0: 1, 1: 5}, 'balanced']}
         ]
 
         best_models = []
@@ -195,9 +192,9 @@ class CustomPipeline:
             X_train, X_test = self.X_train.iloc[train_idx], self.X_train.iloc[test_idx]
             y_train, y_test = self.y_train.iloc[train_idx], self.y_train.iloc[test_idx]
 
-            model = LogisticRegression(random_state=69, max_iter=10000)
+            model = LogisticRegression(random_state=RANDOM_SEED, max_iter=MAX_ITER)
             grid_search = GridSearchCV(model,param_grid,
-                                       scoring={'recall': 'recall', 'f1': 'f1'}, refit='f1',
+                                       scoring={'precision': 'precision', 'f1': 'f1'}, refit='f1',
                                        cv=inner_cv, verbose = 2, error_score='raise', n_jobs=3)
             grid_search.fit(X_train, y_train)
             best_model = grid_search.best_estimator_
@@ -222,7 +219,7 @@ class CustomPipeline:
             pickle.dump(self.model, f)
         print("Best nested CV model saved as nested_cv_best_model.pkl")
         with open("nested_cv_hyperparams.txt", "w") as f:
-            f.write(str(grid_search.best_params_))
+            f.write(str(self.model.get_params()))
         print("Best hyperparameters saved in nested_cv_hyperparams.txt")
 
     def train(self, apply_reweighting=False):
@@ -234,10 +231,28 @@ class CustomPipeline:
             self.model.fit(self.X_train, self.y_train)
         print("Training is Done")
 
-    def predict(self):
-        self.y_pred = self.model.predict(self.X_test)
-        if self.model_type == "logreg":
-            self.y_prob = self.model.predict_proba(self.X_test)[:, 1]
+    def predict(self, optimal_threshold=True):
+        # self.y_pred = self.model.predict(self.X_test)
+        # if self.model_type == "logreg":
+        #     self.y_prob = self.model.predict_proba(self.X_test)[:, 1]
+
+        y_probs = self.model.predict_proba(self.X_test)[:, 1]
+        if optimal_threshold:
+            precisions, recalls, thresholds = precision_recall_curve(self.y_test, y_probs)
+
+            # Choose the Threshold based on the F1 score
+            f1_scores = (2 * precisions * recalls) / (precisions + recalls + 1e-6)
+            best_idx = np.argmax(f1_scores)
+            self.optimal_threshold = thresholds[best_idx]
+
+            print(f"Optimal threshold found: {self.optimal_threshold:.3f}")
+            self.y_pred = (y_probs >= self.optimal_threshold).astype(int)
+        else:
+            # Default threshold: 0.5
+            self.y_pred = (y_probs >= 0.5).astype(int)
+
+        self.y_prob = y_probs
+
         
     def eval(self):
 
@@ -252,7 +267,7 @@ class CustomPipeline:
                 Confusion Matrix: \n{conf_matrix}\n
                 Report: \n{report}\n
                 """)
-            
+
             # AUC-ROC
             fpr, tpr, thresholds = roc_curve(self.y_test, self.y_prob)
             roc_auc = auc(fpr, tpr)
