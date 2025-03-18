@@ -267,7 +267,7 @@ class CustomPipeline:
             plt.ylabel('True Positive Rate')
             plt.title('ROC Curve')
             plt.legend()
-            plt.savefig("../assets/Log_Reg_ROCAUC.png")
+            plt.savefig("assets/Log_Reg_ROCAUC.png")
             
             # F1 Score & Precision-Recall
             f1 = f1_score(self.y_test, self.y_pred)
@@ -282,7 +282,7 @@ class CustomPipeline:
             plt.ylabel('Precision')
             plt.title('Precision-Recall Curve')
             plt.legend()
-            plt.savefig("../assets/Log_Reg_PrecRecCur.png")
+            plt.savefig("assets/Log_Reg_PrecRecCur.png")
             
             # Calibration (Brier Score + Calibration Plot)
             brier = brier_score_loss(self.y_test, self.y_prob)
@@ -296,7 +296,7 @@ class CustomPipeline:
             plt.ylabel('Fraction of Positives')
             plt.title('Calibration Plot')
             plt.legend()
-            plt.savefig("../assets/Log_Reg_CalScore.png")
+            plt.savefig("assets/Log_Reg_CalScore.png")
             
             # Reconstruct test set from original df using the SAME index
             df_test = self.df.loc[self.X_test.index]  # <--- DO NOT reset the index
@@ -347,7 +347,7 @@ class CustomPipeline:
             plt.title('Logistic Regression Feature Coefficients')
             plt.xlabel('Coefficient Value')
             plt.ylabel('Feature')
-            plt.savefig("../assets/Log_Reg_FeatImp.png")
+            plt.savefig("assets/Log_Reg_FeatImp.png")
             
         elif self.model_type == "dectree": 
             
@@ -370,7 +370,7 @@ class CustomPipeline:
             plt.xlabel('Predicted Label')
             plt.ylabel('Actual Label')
             plt.title('Confusion Matrix')
-            plt.savefig("../assets/Dec_Tree_ConfMat.png")
+            plt.savefig("assets/Dec_Tree_ConfMat.png")
 
             # ROC AUC CURVE computation
             # Get predicted probabilities for the positive class
@@ -388,7 +388,7 @@ class CustomPipeline:
             plt.ylabel('True Positive Rate')
             plt.title('Receiver Operating Characteristic')
             plt.legend(loc='lower right')
-            plt.savefig("../assets/Dec_Tree_ROCAUC.png")
+            plt.savefig("assets/Dec_Tree_ROCAUC.png")
 
 
             # DECISION TREE VIZ
@@ -396,7 +396,7 @@ class CustomPipeline:
             plot_tree(self.model, max_depth=5, filled=True, feature_names=self.X_final.columns, 
                     class_names=['dies', 'survives'], rounded=True)
             plt.title('Decision Tree Visualization')
-            plt.savefig("../assets/Dec_Tree_Viz.png")
+            plt.savefig("assets/Dec_Tree_Viz.png")
 
 
             # FEATURE IMPORTANCE BAR CHART
@@ -411,21 +411,32 @@ class CustomPipeline:
             plt.xticks(range(len(features)), features[indices], rotation=90)
             plt.xlabel('Features')
             plt.ylabel('Importance')
-            plt.savefig("../assets/Dec_Tree_FeatImp.png")
+            plt.savefig("assets/Dec_Tree_FeatImp.png")
         
         else: 
             raise ValueError("Ooops... Something went wrong, check the model_type during initialization")
         
     def explain_model(self):
+        features = self.X_final.columns
         try:
             # SHAP
-            explainer = shap.Explainer(self.model, self.X_train)
+            explainer = shap.Explainer(self.model.predict_proba, self.X_train)
             shap_values = explainer(self.X_test)
 
-            # Plot SHAP 
-            shap.summary_plot(shap_values, self.X_test, plot_type="bar")
+            print("SHAP values summary:", shap_values.values)
+
+            # shap values for the num of observations desired
+            num_observations = 5  
+            for i in range(min(num_observations, len(self.X_test))):
+                print(f"SHAP values for observation {i}:")
+                shap_df = pd.DataFrame(shap_values.values[i, :, 1], index=self.X_test.columns, columns=['SHAP Value'])
+                print(shap_df)
+                print("\n" + "-"*50 + "\n")
+            
+            # Plot SHAP summary plot
+            shap.summary_plot(shap_values.values[..., 1], self.X_test, plot_type="bar", show=False)
             plt.title('SHAP Summary Plot')
-            plt.savefig('../assets/shap_summary_plot.png')
+            plt.savefig('assets/shap_summary_plot.png')
             plt.clf()
 
             # LIME 
@@ -438,10 +449,15 @@ class CustomPipeline:
 
             # Explain a random instance
             i = np.random.randint(0, self.X_test.shape[0])
-            exp = explainer.explain_instance(self.X_test.iloc[i].values, self.model.predict_proba, num_features=10)
+            exp = explainer.explain_instance(self.X_test.iloc[i].values, self.model.predict_proba, num_features=len(features))
+            fig, ax = plt.subplots(figsize=(8, 6))
             exp.as_pyplot_figure()
             plt.title(f'LIME Explanation {i}')
-            plt.savefig(f'../assets/lime_explanation_instance_{i}.png')
+            ax.set_ylabel('Features', fontsize=10)
+            plt.xticks(rotation=45) 
+            plt.tight_layout()
+            plt.savefig(f'assets/lime_explanation_instance_{i}.png')
+            plt.close(fig)
 
             print(f"LIME explanation for instance {i} saved.")
             return self
@@ -457,9 +473,13 @@ class CustomPipeline:
     def __repr__(self):
         return f"Model: {self.model_type}, data: {self.df}"
     
+
+
 pipe = CustomPipeline("logreg")
-pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
-pipe.nested_cross_validation()
+
+pipe.preprocessing("physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+#pipe.nested_cross_validation()
+
 
 
 print("Model WITHOUT reweighting:")
@@ -467,9 +487,11 @@ pipe.train(apply_reweighting=False)
 pipe.predict()
 pipe.eval()
 
+'''
 print("Model WITH reweighting:")
 pipe.train(apply_reweighting=True)
 pipe.predict()
 pipe.eval()
+'''
 
 pipe.explain_model()
