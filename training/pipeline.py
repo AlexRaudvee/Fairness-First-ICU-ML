@@ -480,7 +480,7 @@ class CustomPipeline:
                                          training_labels=self.y_train,
                                          feature_names=self.X_train.columns.tolist(),
                                          class_names=['Negative', 'Positive'],
-                                         random_state=42)
+                                         random_state=RANDOM_SEED)
 
             # Explain a random instance
             i = np.random.randint(0, self.X_test.shape[0])
