@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -11,6 +12,7 @@ from sklearn.metrics import (accuracy_score, confusion_matrix, classification_re
                              roc_curve, auc, precision_recall_curve, f1_score,
                              average_precision_score, brier_score_loss, roc_auc_score)
 from sklearn.calibration import calibration_curve
+from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 from utils import *
 import shap
 from lime.lime_tabular import LimeTabularExplainer
@@ -207,12 +209,6 @@ class CustomPipeline:
         self.model = best_models[best_idx]
         print(f"Best model selected with AU-ROC: {best_scores[best_idx]:.4f}")
 
-        if grid_search.best_params_["class_weight"] == "reweighting":
-            self.reweighting = True
-        elif grid_search.best_params_["class_weight"] == "balanced":
-            self.reweighting = False
-        else:
-            self.reweighting = False
 
         with open("nested_cv_best_model.pkl", "wb") as f:
             pickle.dump(self.model, f)
@@ -221,14 +217,22 @@ class CustomPipeline:
             f.write(str(self.model.get_params()))
         print("Best hyperparameters saved in nested_cv_hyperparams.txt")
 
-    def train(self, apply_reweighting=False):
+    def train(self, apply_reweighting=False, calibrate=False):
         if apply_reweighting:
             self.X_train = self.ohe.inverse_transform(self.X_train)
             self.y_train = self.ohe.inverse_transform(self.y_train)
             self.model.fit(self.X_train, self.y_train, sample_weight=self.sample_weights)
         else:
             self.model.fit(self.X_train, self.y_train)
-        print("Training is Done")
+
+        if calibrate:
+            self.model= CalibratedClassifierCV(
+                estimator= self.model,
+                method= 'isotonic',
+                cv= 5
+            )
+            self.model.fit(self.X_train, self.y_train)
+
 
     def predict(self, optimal_threshold=True):
         # self.y_pred = self.model.predict(self.X_test)
@@ -265,7 +269,7 @@ class CustomPipeline:
                 Confusion Matrix: \n{conf_matrix}\n
                 Report: \n{report}\n
                 """)
-            
+
             # AUC-ROC
             fpr, tpr, thresholds = roc_curve(self.y_test, self.y_prob)
             roc_auc = auc(fpr, tpr)
@@ -279,7 +283,7 @@ class CustomPipeline:
             plt.ylabel('True Positive Rate')
             plt.title('ROC Curve')
             plt.legend()
-            plt.savefig("assets/Log_Reg_ROCAUC.png")
+            plt.savefig("../assets/Log_Reg_ROCAUC.png")
             
             # F1 Score & Precision-Recall
             f1 = f1_score(self.y_test, self.y_pred)
@@ -294,11 +298,29 @@ class CustomPipeline:
             plt.ylabel('Precision')
             plt.title('Precision-Recall Curve')
             plt.legend()
-            plt.savefig("assets/Log_Reg_PrecRecCur.png")
+            plt.savefig("../assets/Log_Reg_PrecRecCur.png")
             
             # Calibration (Brier Score + Calibration Plot)
             brier = brier_score_loss(self.y_test, self.y_prob)
             print(f"Brier Score: {brier:.3f} (lower = better calibrated)")
+
+            hl_stat, p_value = hosmer_lemeshow_test(self.y_test, self.y_prob, group=10)
+            print(f"Hosmer-Lemeshow C-statistic: {hl_stat:.3f}")
+            print(f"Hosmer-Lemeshow p-value: {p_value:.3f}")
+
+
+            mean_pred_mortality = np.mean(self.y_prob) * 100
+            print(f"Mean Predicted Mortality (%): {mean_pred_mortality:.2f}")
+
+            observed_mortality = np.mean(self.y_test) * 100
+            print(f"Observed Mortality (%): {observed_mortality:.2f}")
+
+
+            observed_deaths = np.sum(self.y_test)
+            expected_deaths = np.sum(self.y_prob)
+            smr = observed_deaths / (expected_deaths + 1e-9)
+            print(f"Standardized Mortality Ratio (SMR): {smr:.3f}")
+
 
             prob_true, prob_pred = calibration_curve(self.y_test, self.y_prob, n_bins=10)
             plt.figure(figsize=(6, 5))
@@ -308,7 +330,7 @@ class CustomPipeline:
             plt.ylabel('Fraction of Positives')
             plt.title('Calibration Plot')
             plt.legend()
-            plt.savefig("assets/Log_Reg_CalScore.png")
+            plt.savefig("../assets/Log_Reg_CalScore.png")
             
             # Reconstruct test set from original df using the SAME index
             df_test = self.df.loc[self.X_test.index]  # <--- DO NOT reset the index
@@ -359,7 +381,7 @@ class CustomPipeline:
             plt.title('Logistic Regression Feature Coefficients')
             plt.xlabel('Coefficient Value')
             plt.ylabel('Feature')
-            plt.savefig("assets/Log_Reg_FeatImp.png")
+            plt.savefig("../assets/Log_Reg_FeatImp.png")
             
         elif self.model_type == "dectree": 
             
@@ -371,6 +393,7 @@ class CustomPipeline:
             # Print the evaluation results
             print(f"""
                   Accuracy: {accuracy}\n 
+                  \nConfusion Matrix: {conf_matrix}\n
                   Report: \n {report}\n
                   """)
             # Compute confusion matrix
@@ -382,7 +405,7 @@ class CustomPipeline:
             plt.xlabel('Predicted Label')
             plt.ylabel('Actual Label')
             plt.title('Confusion Matrix')
-            plt.savefig("assets/Dec_Tree_ConfMat.png")
+            plt.savefig("../assets/Dec_Tree_ConfMat.png")
 
             # ROC AUC CURVE computation
             # Get predicted probabilities for the positive class
@@ -400,7 +423,7 @@ class CustomPipeline:
             plt.ylabel('True Positive Rate')
             plt.title('Receiver Operating Characteristic')
             plt.legend(loc='lower right')
-            plt.savefig("assets/Dec_Tree_ROCAUC.png")
+            plt.savefig("../assets/Dec_Tree_ROCAUC.png")
 
 
             # DECISION TREE VIZ
@@ -408,7 +431,7 @@ class CustomPipeline:
             plot_tree(self.model, max_depth=5, filled=True, feature_names=self.X_final.columns, 
                     class_names=['dies', 'survives'], rounded=True)
             plt.title('Decision Tree Visualization')
-            plt.savefig("assets/Dec_Tree_Viz.png")
+            plt.savefig("../assets/Dec_Tree_Viz.png")
 
 
             # FEATURE IMPORTANCE BAR CHART
@@ -423,7 +446,7 @@ class CustomPipeline:
             plt.xticks(range(len(features)), features[indices], rotation=90)
             plt.xlabel('Features')
             plt.ylabel('Importance')
-            plt.savefig("assets/Dec_Tree_FeatImp.png")
+            plt.savefig("../assets/Dec_Tree_FeatImp.png")
         
         else: 
             raise ValueError("Ooops... Something went wrong, check the model_type during initialization")
@@ -448,7 +471,7 @@ class CustomPipeline:
             # Plot SHAP summary plot
             shap.summary_plot(shap_values.values[..., 1], self.X_test, plot_type="bar", show=False)
             plt.title('SHAP Summary Plot')
-            plt.savefig('assets/shap_summary_plot.png')
+            plt.savefig('../assets/shap_summary_plot.png')
             plt.clf()
 
             # LIME
@@ -468,7 +491,7 @@ class CustomPipeline:
             ax.set_ylabel('Features', fontsize=10)
             plt.xticks(rotation=45)
             plt.tight_layout()
-            plt.savefig(f'assets/lime_explanation_instance_{i}.png')
+            plt.savefig(f'../assets/lime_explanation_instance_{i}.png')
             plt.close(fig)
 
             print(f"LIME explanation for instance {i} saved.")
@@ -486,24 +509,24 @@ class CustomPipeline:
         return f"Model: {self.model_type}, data: {self.df}"
 
 
+# dec_pipe = CustomPipeline("dectree")
+# dec_pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+# dec_pipe.train()
+# dec_pipe.predict()
+# dec_pipe.eval()
+# dec_pipe.explain_model()
 
-pipe = CustomPipeline("logreg")
-
-pipe.preprocessing("physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
-#pipe.nested_cross_validation()
 
 
+log_pipe = CustomPipeline("logreg")
+log_pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+#log_pipe.nested_cross_validation()
+with open('nested_cv_best_model.pkl', 'rb') as file:
+    log_pipe.model = pickle.load(file)
+    print(log_pipe.model.get_params())
+log_pipe.train(apply_reweighting=False, calibrate= True)
+log_pipe.predict()
+log_pipe.eval()
+log_pipe.explain_model()
 
-print("Model WITHOUT reweighting:")
-pipe.train(apply_reweighting=False)
-pipe.predict()
-pipe.eval()
 
-'''
-print("Model WITH reweighting:")
-pipe.train(apply_reweighting=True)
-pipe.predict()
-pipe.eval()
-'''
-
-pipe.explain_model()

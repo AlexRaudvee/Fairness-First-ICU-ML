@@ -1,10 +1,12 @@
 # data wrangling
 import pandas as pd
+import numpy as np
 
 # data preprocessing
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.ensemble import IsolationForest
+from scipy.stats import chi2
 
 RANDOM_SEED = 28
 MAX_ITER = 5000
@@ -109,3 +111,39 @@ def get_path_until_data(s):
     else:
         return None  # or handle the case when marker is not found
 
+
+def hosmer_lemeshow_test(y_true, y_prob, group=10):
+    y_true = np.asarray(y_true)
+    y_prob = np.asarray(y_prob)
+
+    sorted_indices = np.argsort(y_prob)
+    y_true_sorted = y_true[sorted_indices]
+    y_prob_sorted = y_prob[sorted_indices]
+
+    n = len(y_true_sorted)
+    group_size = n // group
+
+    O1 = np.zeros(group)  # Observed positives
+    E1 = np.zeros(group)  # Expected positives
+    O0 = np.zeros(group)  # Observed negatives
+    E0 = np.zeros(group)  # Expected negatives
+
+    for i in range(group):
+        start = i * group_size
+        end = (i + 1) * group_size if (i < group - 1) else n
+        y_true_chunk = y_true_sorted[start:end]
+        y_prob_chunk = y_prob_sorted[start:end]
+
+        O1[i] = np.sum(y_true_chunk)
+        E1[i] = np.sum(y_prob_chunk)
+        O0[i] = len(y_true_chunk) - O1[i]
+        E0[i] = np.sum(1.0 - y_prob_chunk)
+
+    hl_stat = 0.0
+    for i in range(group):
+        hl_stat += ((O1[i] - E1[i])**2) / (E1[i] + 1e-9)
+        hl_stat += ((O0[i] - E0[i])**2) / (E0[i] + 1e-9)
+
+    dof = group - 2
+    p_value = 1.0 - chi2.cdf(hl_stat, dof)
+    return hl_stat, p_value
