@@ -376,13 +376,19 @@ class CustomPipeline:
             coef_df = pd.DataFrame({'Feature': features, 'Coefficient': coefficients})
             coef_df = coef_df.sort_values(by='Coefficient', ascending=False)
 
-            plt.figure(figsize=(12, 8))
-            sns.barplot(x='Coefficient', y='Feature', data=coef_df, palette='viridis')
-            plt.title('Logistic Regression Feature Coefficients')
-            plt.xlabel('Coefficient Value')
-            plt.ylabel('Feature')
-            plt.savefig("../assets/Log_Reg_FeatImp.png")
-            
+            # coefficients = self.model.coef_[0]
+            # features = self.X_final.columns
+            #
+            # coef_df = pd.DataFrame({'Feature': features, 'Coefficient': coefficients})
+            # coef_df = coef_df.sort_values(by='Coefficient', ascending=False)
+            #
+            # plt.figure(figsize=(12, 8))
+            # sns.barplot(x='Coefficient', y='Feature', data=coef_df, palette='viridis')
+            # plt.title('Logistic Regression Feature Coefficients')
+            # plt.xlabel('Coefficient Value')
+            # plt.ylabel('Feature')
+            # plt.savefig("../assets/Log_Reg_FeatImp.png")
+
         elif self.model_type == "dectree": 
             
             # Calculate evaluation metrics
