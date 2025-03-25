@@ -10,5 +10,5 @@ COPY . .
 # Install dependencies from requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Define the command to run the script
-CMD ["python", "dataloader.py"]
+# Run dataloader.py and then main.py sequentially
+CMD ["sh", "-c", "python dataloader.py && python main.py"]
