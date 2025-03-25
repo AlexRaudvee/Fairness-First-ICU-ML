@@ -289,7 +289,7 @@ class CustomPipeline:
             f1 = f1_score(self.y_test, self.y_pred)
             precision, recall, _ = precision_recall_curve(self.y_test, self.y_prob)
             avg_precision = average_precision_score(self.y_test, self.y_prob)
-            print(f"F1 Score: {f1:.3f}")
+            # print(f"F1 Score: {f1:.3f}")
             print(f"Average Precision (PR AUC): {avg_precision:.3f}")
 
             plt.figure(figsize=(6, 5))
@@ -518,15 +518,26 @@ class CustomPipeline:
 
 
 
-log_pipe = CustomPipeline("logreg")
-log_pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
-#log_pipe.nested_cross_validation()
-with open('nested_cv_best_model.pkl', 'rb') as file:
-    log_pipe.model = pickle.load(file)
-    print(log_pipe.model.get_params())
-log_pipe.train(apply_reweighting=False, calibrate= True)
-log_pipe.predict()
-log_pipe.eval()
-log_pipe.explain_model()
+# log_pipe = CustomPipeline("logreg")
+# log_pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+# #log_pipe.nested_cross_validation()
+# with open('FINAL_model.pkl', 'rb') as file:
+#     log_pipe.model = pickle.load(file)
+#     print(log_pipe.model.get_params())
+# log_pipe.train(apply_reweighting=False, calibrate= True)
+# log_pipe.predict()
+# log_pipe.eval()
+# log_pipe.explain_model()
+
+
+# dec_pipe = CustomPipeline("dectree")
+# dec_pipe.preprocessing("../physionet.org/files/widsdatathon2020/1.0.0/data/training_v2.csv", "../physionet.org/files/widsdatathon2020/1.0.0/data/WiDS_Datathon_2020_Dictionary.csv", "hospital_death")
+# dec_pipe.train()
+# dec_pipe.predict()
+# dec_pipe.eval()
+# dec_pipe.explain_model()
+
+
+
 
 

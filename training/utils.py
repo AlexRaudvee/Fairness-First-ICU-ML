@@ -1,12 +1,12 @@
-# data wrangling
 import pandas as pd
 import numpy as np
 
-# data preprocessing
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.ensemble import IsolationForest
 from scipy.stats import chi2
+import statsmodels.api as sm
+
 
 RANDOM_SEED = 28
 MAX_ITER = 5000
